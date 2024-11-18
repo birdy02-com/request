@@ -56,16 +56,16 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 		reqArg.Stream = args.Stream
 	}
 
-	//proxyURL, err := url.Parse("http://127.0.0.1:8080")
-	//if err != nil {
-	//	log.Fatalf("解析代理地址失败: %v", err)
-	//}
+	proxyURL, err := url.Parse("http://127.0.0.1:8080")
+	if err != nil {
+		//log.Fatalf("解析代理地址失败: %v", err)
+	}
 
 	// 请求参数设置
 	// 创建一个自定义的Transport，并禁用证书验证
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		//Proxy:           http.ProxyURL(proxyURL),
+		Proxy:           http.ProxyURL(proxyURL),
 	}
 	// 设置Params
 	params := url.Values{}
@@ -227,10 +227,10 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 	}
 	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
 	var body io.Reader
+	var buf bytes.Buffer
 	var bodyByte = make([]byte, 0)
 	if args.File != nil {
-		var b bytes.Buffer
-		w := NewWriter(&b)
+		w := NewWriter(&buf)
 		reqArg.Headers["Content-Type"] = w.FormDataContentType()
 		for Field, file := range args.File {
 			if len(file) < 0 {
@@ -255,8 +255,8 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 				return nil, err
 			}
 		}
-		body = &b
-		bodyByte = b.Bytes()
+		body = &buf
+		bodyByte = buf.Bytes()
 		if args.DataJson != nil {
 			for k, v := range args.DataJson {
 				fileWrite, err := w.CreateFormField(k)
@@ -280,7 +280,6 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 		}
 		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
 	} else if args.DataJson != nil {
-		var buf bytes.Buffer
 		isFirst := true
 		for key, value := range args.DataJson {
 			if !isFirst {
@@ -299,10 +298,8 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 		if err != nil {
 			return nil, err
 		}
-		body = bytes.NewBuffer(jsonData)
-		if d, e := io.ReadAll(body); e == nil {
-			bodyByte = d
-		}
+		body = strings.NewReader(string(jsonData))
+		bodyByte = jsonData
 		reqArg.Headers["Content-Type"] = "application/json"
 	}
 	req, err := http.NewRequest(http.MethodPost, fullURL, body)
