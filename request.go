@@ -255,8 +255,6 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 				return nil, err
 			}
 		}
-		body = &buf
-		bodyByte = buf.Bytes()
 		if args.DataJson != nil {
 			for k, v := range args.DataJson {
 				fileWrite, err := w.CreateFormField(k)
@@ -273,6 +271,8 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 		if err != nil {
 			return nil, err
 		}
+		body = &buf
+		bodyByte = buf.Bytes()
 	} else if args.Data != "" {
 		body = strings.NewReader(args.Data)
 		if d, e := io.ReadAll(body); e == nil {
