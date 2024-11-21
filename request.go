@@ -232,6 +232,18 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 	if args.File != nil {
 		w := NewWriter(&buf)
 		reqArg.Headers["Content-Type"] = w.FormDataContentType()
+		if args.DataJson != nil {
+			for k, v := range args.DataJson {
+				fileWrite, err := w.CreateFormField(k)
+				if err != nil {
+					return nil, err
+				}
+				_, err = fileWrite.Write([]byte(v))
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 		for Field, file := range args.File {
 			if len(file) < 0 {
 				return nil, errors.New("")
@@ -253,18 +265,6 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 			}
 			if err != nil {
 				return nil, err
-			}
-		}
-		if args.DataJson != nil {
-			for k, v := range args.DataJson {
-				fileWrite, err := w.CreateFormField(k)
-				if err != nil {
-					return nil, err
-				}
-				_, err = fileWrite.Write([]byte(v))
-				if err != nil {
-					return nil, err
-				}
 			}
 		}
 		err := w.Close()
