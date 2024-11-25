@@ -1,5 +1,10 @@
 # request
 
+# 使用
+```
+go get github.com/birdy02-com/request
+```
+
 # 1. 简介
 一款基于 net/http 二次封装的客户端请求库，支持返回更丰富的响应结构和内容；包含多种方法：
 目前支持[HEAD/GET/POST]
