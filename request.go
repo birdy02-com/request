@@ -72,10 +72,13 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	}
 	uParse, _ := url.Parse(baseurl)
 	Params := params.Encode()
-
 	tmpParams := strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?")
 	if tmpParams != "" {
-		Params = fmt.Sprintf("%s&%s", Params, tmpParams)
+		if Params != "" {
+			Params = fmt.Sprintf("%s&%s", Params, tmpParams)
+		} else {
+			Params = tmpParams
+		}
 	}
 	fullURL := fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Host, uParse.Path, Params)
 	suffixToRemove := "?"
