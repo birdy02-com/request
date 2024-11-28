@@ -56,16 +56,14 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 		reqArg.Stream = args.Stream
 	}
 
-	proxyURL, err := url.Parse("http://127.0.0.1:8080")
-	if err != nil {
-		//log.Fatalf("解析代理地址失败: %v", err)
-	}
+	//proxyURL, err := url.Parse("http://127.0.0.1:8080")
+	//if err != nil { }
 
 	// 请求参数设置
 	// 创建一个自定义的Transport，并禁用证书验证
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		Proxy:           http.ProxyURL(proxyURL),
+		//Proxy:           http.ProxyURL(proxyURL),
 	}
 	// 设置Params
 	params := url.Values{}
@@ -73,10 +71,13 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 		params.Set(k, v)
 	}
 	uParse, _ := url.Parse(baseurl)
-	for k, v := range uParse.Query() {
-		params.Set(k, v[0])
+	Params := params.Encode()
+
+	tmpParams := strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?")
+	if tmpParams != "" {
+		Params = fmt.Sprintf("%s&%s", Params, tmpParams)
 	}
-	fullURL := fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Host, uParse.Path, params.Encode())
+	fullURL := fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Host, uParse.Path, Params)
 	suffixToRemove := "?"
 	if strings.HasSuffix(fullURL, suffixToRemove) {
 		fullURL = strings.TrimSuffix(fullURL, suffixToRemove)
