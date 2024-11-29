@@ -56,14 +56,15 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 		reqArg.Stream = args.Stream
 	}
 
-	//proxyURL, err := url.Parse("http://127.0.0.1:8080")
-	//if err != nil { }
+	proxyURL, err := url.Parse("http://127.0.0.1:8080")
+	if err != nil {
+	}
 
 	// 请求参数设置
 	// 创建一个自定义的Transport，并禁用证书验证
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		//Proxy:           http.ProxyURL(proxyURL),
+		Proxy:           http.ProxyURL(proxyURL),
 	}
 	// 设置Params
 	params := url.Values{}
@@ -279,7 +280,7 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 		bodyByte = buf.Bytes()
 	} else if args.Data != "" {
 		body = strings.NewReader(args.Data)
-		if d, e := io.ReadAll(body); e == nil {
+		if d, e := io.ReadAll(strings.NewReader(args.Data)); e == nil {
 			bodyByte = d
 		}
 		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
