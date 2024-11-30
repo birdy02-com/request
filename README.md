@@ -9,6 +9,9 @@ go get github.com/birdy02-com/request
 一款基于 net/http 二次封装的客户端请求库，支持返回更丰富的响应结构和内容；包含多种方法：
 目前支持[HEAD/GET/POST]
 
+## 更新日志
+* 2024-11-30：修复处理部分url时，出现 http(s)://xxx?/的情况
+
 # 2. 优点
 * POST一键获取请求体；对比：net/http无法直接获取请求body
 * 根据响应内容多层判断获取编码格式
