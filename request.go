@@ -73,7 +73,7 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	}
 	uParse, _ := url.Parse(baseurl)
 	Params := params.Encode()
-	tmpParams := strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?")
+	tmpParams := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?"), "/")
 	if tmpParams != "" {
 		if Params != "" {
 			Params = fmt.Sprintf("%s&%s", Params, tmpParams)
