@@ -23,6 +23,7 @@ func GetRequestInit() *GetRequest {
 	res.Headers = make(map[string]string)
 	res.Params = make(map[string]string)
 	res.Stream = true
+	res.Proxy = ""
 	return &res
 }
 
@@ -55,17 +56,21 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	if args.Stream != reqArg.Stream {
 		reqArg.Stream = args.Stream
 	}
-
-	//proxyURL, err := url.Parse("http://127.0.0.1:8080")
-	//if err != nil {
-	//}
-
 	// 请求参数设置
 	// 创建一个自定义的Transport，并禁用证书验证
-	transport := &http.Transport{
+	var transport *http.Transport
+	transport = &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		//Proxy:           http.ProxyURL(proxyURL),
 	}
+	if reqArg.Proxy != "" && strings.HasPrefix(reqArg.Proxy, "http") {
+		if proxyURL, err := url.Parse(reqArg.Proxy); err == nil {
+			transport = &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				Proxy:           http.ProxyURL(proxyURL),
+			}
+		}
+	}
+
 	// 设置Params
 	params := url.Values{}
 	for k, v := range reqArg.Params {
@@ -74,14 +79,13 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	uParse, _ := url.Parse(baseurl)
 	Params := params.Encode()
 	tmpParams := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?"), "/")
-	if tmpParams != "" {
-		if Params != "" {
-			Params = fmt.Sprintf("%s&%s", Params, tmpParams)
-		} else {
-			Params = tmpParams
-		}
+	if tmpParams != "" && Params != "" {
+		Params = fmt.Sprintf("%s&%s", Params, tmpParams)
+	} else if tmpParams != "" {
+		Params = tmpParams
 	}
 	fullURL := fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Host, uParse.Path, Params)
+	fullURL = strings.ReplaceAll(fullURL, " ", "%20")
 	suffixToRemove := "?"
 	if strings.HasSuffix(fullURL, suffixToRemove) {
 		fullURL = strings.TrimSuffix(fullURL, suffixToRemove)
@@ -263,7 +267,7 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 			if err != nil {
 				return nil, err
 			}
-			if len(file) > 2 {
+			if len(file) > 1 {
 				_, err = fileWrite.Write([]byte(file[1]))
 			} else {
 				_, err = fileWrite.Write([]byte(""))
@@ -308,6 +312,108 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 		reqArg.Headers["Content-Type"] = "application/json"
 	}
 	req, err := http.NewRequest(http.MethodPost, fullURL, body)
+	if err != nil {
+		return &Response{}, err
+	}
+	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
+	timer := time.Now().UnixMicro()
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	result, err := Result(baseurl, fullURL, resp)
+	if err != nil {
+		return nil, err
+	}
+	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
+	result.Request.Body = bodyByte
+	return result, nil
+}
+
+// PUT 发送HTTP PUT请求
+func PUT(baseurl string, arg ...GetRequest) (*Response, error) {
+	var args GetRequest
+	if len(arg) > 0 {
+		args = arg[0]
+	}
+	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
+	var body io.Reader
+	var buf bytes.Buffer
+	var bodyByte = make([]byte, 0)
+	if args.File != nil {
+		w := NewWriter(&buf)
+		reqArg.Headers["Content-Type"] = w.FormDataContentType()
+		if args.DataJson != nil {
+			for k, v := range args.DataJson {
+				fileWrite, err := w.CreateFormField(k)
+				if err != nil {
+					return nil, err
+				}
+				_, err = fileWrite.Write([]byte(v))
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		for Field, file := range args.File {
+			if len(file) < 0 {
+				return nil, errors.New("")
+			}
+			var err error
+			var fileWrite io.Writer
+			if len(file) > 2 {
+				fileWrite, err = w.CreateFormFile(Field, file[0], file[2])
+			} else {
+				fileWrite, err = w.CreateFormFile(Field, file[0])
+			}
+			if err != nil {
+				return nil, err
+			}
+			if len(file) > 1 {
+				_, err = fileWrite.Write([]byte(file[1]))
+			} else {
+				_, err = fileWrite.Write([]byte(""))
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		err := w.Close()
+		if err != nil {
+			return nil, err
+		}
+		body = &buf
+		bodyByte = buf.Bytes()
+	} else if args.Data != "" {
+		body = strings.NewReader(args.Data)
+		if d, e := io.ReadAll(strings.NewReader(args.Data)); e == nil {
+			bodyByte = d
+		}
+		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
+	} else if args.DataJson != nil {
+		isFirst := true
+		for key, value := range args.DataJson {
+			if !isFirst {
+				buf.WriteString("&")
+			}
+			isFirst = false
+			buf.WriteString(url.QueryEscape(key))
+			buf.WriteString("=")
+			buf.WriteString(url.QueryEscape(value))
+		}
+		body = &buf
+		bodyByte = buf.Bytes()
+		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
+	} else if args.Json != nil {
+		jsonData, err := json.Marshal(args.Json)
+		if err != nil {
+			return nil, err
+		}
+		body = strings.NewReader(string(jsonData))
+		bodyByte = jsonData
+		reqArg.Headers["Content-Type"] = "application/json"
+	}
+	req, err := http.NewRequest(http.MethodPut, fullURL, body)
 	if err != nil {
 		return &Response{}, err
 	}
