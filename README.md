@@ -11,6 +11,8 @@ go get github.com/birdy02-com/request
 
 如果你有好的建议欢迎在 [林乐天的个人博客](https://www.birdy02.com/2024/06/27/b18cf3d1-6702-4c42-b2a0-2089906d2edd) 中留言🙂。
 
+参考文档：[https://www.birdy02.com/docs/birdy02-com-request](https://www.birdy02.com/docs/birdy02-com-request)
+
 ## 功能特点
 
 ### 1. 便捷的请求调用
