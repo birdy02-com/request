@@ -58,16 +58,10 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	}
 	// 请求参数设置
 	// 创建一个自定义的Transport，并禁用证书验证
-	var transport *http.Transport
-	transport = &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	if reqArg.Proxy != "" && strings.HasPrefix(reqArg.Proxy, "http") {
-		if proxyURL, err := url.Parse(reqArg.Proxy); err == nil {
-			transport = &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				Proxy:           http.ProxyURL(proxyURL),
-			}
+	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	if args.Proxy != "" && strings.HasPrefix(args.Proxy, "http") {
+		if proxyURL, err := url.Parse(args.Proxy); err == nil {
+			transport.Proxy = http.ProxyURL(proxyURL)
 		}
 	}
 
