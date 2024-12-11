@@ -112,6 +112,9 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 // Result 获取请求响应
 func Result(baseurl, fullURL string, resp *http.Response) (*Response, error) {
 	var result Response
+	if resp == nil {
+		return &result, nil
+	}
 	defer func(Body io.ReadCloser) {
 		if err1 := Body.Close(); err1 != nil {
 		}
@@ -156,12 +159,12 @@ func Result(baseurl, fullURL string, resp *http.Response) (*Response, error) {
 	}
 	result.Headers = resp.Header
 	result.Url = resp.Request.URL.String()
-
-	result.Json = Json
-	result.Length = len(body)
 	result.Proto = resp.Proto
 	result.ProtoMajor = resp.ProtoMajor
 	result.ProtoMinor = resp.ProtoMinor
+
+	result.Json = Json
+	result.Length = len(body)
 	return &result, nil
 }
 
