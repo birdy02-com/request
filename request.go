@@ -24,6 +24,7 @@ func GetRequestInit() *GetRequest {
 	res.Params = make(map[string]string)
 	res.Stream = true
 	res.Proxy = ""
+	res.Cms = false
 	return &res
 }
 
@@ -171,16 +172,36 @@ func HEAD(baseurl string, arg ...GetRequest) (*Response, error) {
 		return &Response{}, err
 	}
 	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	req.AddCookie(&http.Cookie{Name: "rememberMe", Value: "me"})
 	timer := time.Now().UnixMicro()
 	resp, err := client.Do(req)
-	if err != nil || resp != nil && resp.StatusCode != 200 {
-		req.Header.Del("Cookie")
-		timer = time.Now().UnixMicro()
-		resp, err = client.Do(req)
-		if err != nil {
-			return nil, err
-		}
+	if err != nil {
+		return nil, err
+	}
+	timer = time.Now().UnixMicro() - timer
+	result, err := Result(baseurl, fullURL, resp)
+	if err != nil {
+		return nil, err
+	}
+	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
+	return result, nil
+}
+
+// OPTIONS 发送HTTP OPTIONS请求
+func OPTIONS(baseurl string, arg ...GetRequest) (*Response, error) {
+	var args GetRequest
+	if len(arg) > 0 {
+		args = arg[0]
+	}
+	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
+	req, err := http.NewRequest(http.MethodHead, fullURL, nil)
+	if err != nil {
+		return &Response{}, err
+	}
+	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
+	timer := time.Now().UnixMicro()
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	timer = time.Now().UnixMicro() - timer
 	result, err := Result(baseurl, fullURL, resp)
@@ -203,10 +224,12 @@ func GET(baseurl string, arg ...GetRequest) (*Response, error) {
 		return &Response{}, err
 	}
 	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	req.AddCookie(&http.Cookie{Name: "rememberMe", Value: "me"})
+	if args.Cms {
+		req.AddCookie(&http.Cookie{Name: "rememberMe", Value: "me"})
+	}
 	timer := time.Now().UnixMicro()
 	resp, err := client.Do(req)
-	if err != nil || resp != nil && resp.StatusCode != 200 {
+	if args.Cms && (err != nil || resp != nil && resp.StatusCode != 200) {
 		req.Header.Del("Cookie")
 		timer = time.Now().UnixMicro()
 		resp, err = client.Do(req)
