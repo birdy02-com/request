@@ -71,19 +71,24 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	for k, v := range reqArg.Params {
 		params.Set(k, v)
 	}
-	uParse, _ := url.Parse(baseurl)
 	Params := params.Encode()
-	tmpParams := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?"), "/")
-	if tmpParams != "" && Params != "" {
-		Params = fmt.Sprintf("%s&%s", Params, tmpParams)
-	} else if tmpParams != "" {
-		Params = tmpParams
-	}
-	fullURL := fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Host, uParse.Path, Params)
-	fullURL = strings.ReplaceAll(fullURL, " ", "%20")
-	suffixToRemove := "?"
-	if strings.HasSuffix(fullURL, suffixToRemove) {
-		fullURL = strings.TrimSuffix(fullURL, suffixToRemove)
+	uParse, err := url.Parse(baseurl)
+	var fullURL string
+	if err == nil {
+		tmpParams := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?"), "/")
+		if tmpParams != "" && Params != "" {
+			Params = fmt.Sprintf("%s&%s", Params, tmpParams)
+		} else if tmpParams != "" {
+			Params = tmpParams
+		}
+		fullURL = fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Host, uParse.Path, Params)
+		fullURL = strings.ReplaceAll(fullURL, " ", "%20")
+		suffixToRemove := "?"
+		if strings.HasSuffix(fullURL, suffixToRemove) {
+			fullURL = strings.TrimSuffix(fullURL, suffixToRemove)
+		}
+	} else {
+		fullURL = baseurl
 	}
 	var client http.Client
 	// 重定向策略
