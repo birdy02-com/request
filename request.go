@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -27,6 +28,8 @@ func GetRequestInit() *GetRequest {
 	res.Cms = false
 	return &res
 }
+
+var _ = os.Setenv("GODEBUG", "tlsrsakex=1")
 
 // GetRequestGetArg 获取请求参数
 func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client, string) {
@@ -90,20 +93,14 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	} else {
 		fullURL = baseurl
 	}
-	var client http.Client
+	client := http.Client{ // 创建http.Client并配置Timeout
+		Timeout:   time.Duration(reqArg.Timeout) * time.Second, // 转换为time.Duration
+		Transport: transport,
+	}
 	// 重定向策略
 	if !reqArg.AllowRedirects {
-		client = http.Client{
-			Timeout: time.Duration(reqArg.Timeout) * time.Second, // 转换为time.Duration
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-			Transport: transport,
-		}
-	} else {
-		client = http.Client{ // 创建http.Client并配置Timeout
-			Timeout:   time.Duration(reqArg.Timeout) * time.Second, // 转换为time.Duration
-			Transport: transport,
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
 		}
 	}
 	return reqArg, client, fullURL
