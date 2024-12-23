@@ -216,8 +216,21 @@ func SetGetRequest(method string, client http.Client, fullURL, baseurl string, r
 	if host := req.Header.Get("Host"); host != "" {
 		req.Host = host
 	}
+	if args.Cms {
+		req.AddCookie(&http.Cookie{Name: "rememberMe", Value: "me"})
+	}
 	timer := time.Now().UnixMicro()
-	if res.resp, err = client.Do(req); err != nil {
+	res.resp, err = client.Do(req)
+
+	if args.Cms && (err != nil || res.resp == nil || res.resp.StatusCode != 200) {
+		req.Header.Del("Cookie")
+		timer = time.Now().UnixMicro()
+		res.resp, err = client.Do(req)
+		if err != nil || res.resp == nil {
+			return nil, err
+		}
+	}
+	if err != nil {
 		return &res, err
 	}
 	res.timer = time.Now().UnixMicro() - timer
@@ -328,28 +341,11 @@ func GET(baseurl string, arg ...GetRequest) (*Response, error) {
 		args = arg[0]
 	}
 	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
-	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
+	res, err := SetGetRequest("get", client, fullURL, baseurl, reqArg, args)
 	if err != nil {
-		return &Response{}, err
+		return nil, err
 	}
-	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	if host := req.Header.Get("Host"); host != "" {
-		req.Host = host
-	}
-	if args.Cms {
-		req.AddCookie(&http.Cookie{Name: "rememberMe", Value: "me"})
-	}
-	timer := time.Now().UnixMicro()
-	resp, err := client.Do(req)
-	if args.Cms && (err != nil || resp != nil && resp.StatusCode != 200) {
-		req.Header.Del("Cookie")
-		timer = time.Now().UnixMicro()
-		resp, err = client.Do(req)
-		if err != nil || resp == nil {
-			return nil, err
-		}
-	}
-	result, err := Result(baseurl, fullURL, resp, timer)
+	result, err := Result(baseurl, fullURL, res.resp, res.timer)
 	if err != nil {
 		return nil, err
 	}
