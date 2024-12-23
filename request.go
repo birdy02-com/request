@@ -15,6 +15,8 @@ import (
 	"time"
 )
 
+var _ = os.Setenv("GODEBUG", "tlsrsakex=1")
+
 // GetRequestInit 默认请求的参数值
 func GetRequestInit() *GetRequest {
 	var res GetRequest
@@ -28,8 +30,6 @@ func GetRequestInit() *GetRequest {
 	res.Cms = false
 	return &res
 }
-
-var _ = os.Setenv("GODEBUG", "tlsrsakex=1")
 
 // GetRequestGetArg 获取请求参数
 func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client, string) {
@@ -106,16 +106,131 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	return reqArg, client, fullURL
 }
 
+// SetRequest 返回格式
+type SetRequest struct {
+	resp  *http.Response
+	timer int64
+	body  []byte
+}
+
+// SetGetRequest GET请求设置
+func SetGetRequest(method string, client http.Client, fullURL, baseurl string, reqArg *GetRequest, args GetRequest) (*SetRequest, error) {
+	method = strings.ToLower(method)
+	res := SetRequest{nil, 0, nil}
+	var body io.Reader
+	if method == "post" || method == "put" {
+		var buf bytes.Buffer
+		if args.File != nil {
+			w := NewWriter(&buf)
+			reqArg.Headers["Content-Type"] = w.FormDataContentType()
+			if args.DataJson != nil {
+				for k, v := range args.DataJson {
+					fileWrite, err := w.CreateFormField(k)
+					if err != nil {
+						return &res, err
+					}
+					_, err = fileWrite.Write([]byte(v))
+					if err != nil {
+						return &res, err
+					}
+				}
+			}
+			for Field, file := range args.File {
+				if len(file) < 0 {
+					return &res, errors.New("")
+				}
+				var err error
+				var fileWrite io.Writer
+				if len(file) > 2 {
+					fileWrite, err = w.CreateFormFile(Field, file[0], file[2])
+				} else {
+					fileWrite, err = w.CreateFormFile(Field, file[0])
+				}
+				if err != nil {
+					return &res, err
+				}
+				if len(file) > 1 {
+					_, err = fileWrite.Write([]byte(file[1]))
+				} else {
+					_, err = fileWrite.Write([]byte(""))
+				}
+				if err != nil {
+					return &res, err
+				}
+			}
+			err := w.Close()
+			if err != nil {
+				return &res, err
+			}
+			body = &buf
+			res.body = buf.Bytes()
+		} else if args.Data != "" {
+			body = strings.NewReader(args.Data)
+			if d, e := io.ReadAll(strings.NewReader(args.Data)); e == nil {
+				res.body = d
+			}
+			reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
+		} else if args.DataJson != nil {
+			isFirst := true
+			for key, value := range args.DataJson {
+				if !isFirst {
+					buf.WriteString("&")
+				}
+				isFirst = false
+				buf.WriteString(url.QueryEscape(key))
+				buf.WriteString("=")
+				buf.WriteString(url.QueryEscape(value))
+			}
+			body = &buf
+			res.body = buf.Bytes()
+			reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
+		} else if args.Json != nil {
+			jsonData, err := json.Marshal(args.Json)
+			if err != nil {
+				return &res, err
+			}
+			body = strings.NewReader(string(jsonData))
+			res.body = jsonData
+			reqArg.Headers["Content-Type"] = "application/json"
+		}
+	}
+	var reqMethod string
+	switch method {
+	case "get":
+		reqMethod = http.MethodGet
+	case "head":
+		reqMethod = http.MethodHead
+	case "options":
+		reqMethod = http.MethodOptions
+	case "post":
+		reqMethod = http.MethodPost
+	case "put":
+		reqMethod = http.MethodPut
+	}
+
+	req, err := http.NewRequest(reqMethod, fullURL, body)
+	if err != nil {
+		return &res, err
+	}
+	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
+	if host := req.Header.Get("Host"); host != "" {
+		req.Host = host
+	}
+	timer := time.Now().UnixMicro()
+	if res.resp, err = client.Do(req); err != nil {
+		return &res, err
+	}
+	res.timer = time.Now().UnixMicro() - timer
+	return &res, nil
+}
+
 // Result 获取请求响应
-func Result(baseurl, fullURL string, resp *http.Response) (*Response, error) {
+func Result(baseurl, fullURL string, resp *http.Response, timer int64) (*Response, error) {
 	var result Response
 	if resp == nil {
 		return &result, nil
 	}
-	defer func(Body io.ReadCloser) {
-		if err1 := Body.Close(); err1 != nil {
-		}
-	}(resp.Body)
+	defer func(Body io.ReadCloser) { _ = Body.Close() }(resp.Body)
 	// 获取原始(字节)响应体
 	content, _ := io.ReadAll(resp.Body)
 	result.Content = content
@@ -136,13 +251,17 @@ func Result(baseurl, fullURL string, resp *http.Response) (*Response, error) {
 	_ = json.Unmarshal(content, &Json)
 	// Request 参数
 	result.Request.URL = fullURL
+
+	if par, err := ParseUrl(fullURL); err == nil {
+		if host := resp.Request.Header.Get("Host"); host != "" {
+			result.Request.URL = strings.Replace(fullURL, par.Hostname, host, -1)
+		}
+	}
+
 	result.Request.Method = resp.Request.Method
 	result.Request.Headers = resp.Request.Header
 	if resp.Request.Method == "POST" && resp.Request.Body != nil {
-		defer func(Body io.ReadCloser) {
-			if err := Body.Close(); err != nil {
-			}
-		}(resp.Request.Body)
+		defer func(Body io.ReadCloser) { _ = Body.Close() }(resp.Request.Body)
 		if reqBody, err := io.ReadAll(resp.Request.Body); err == nil {
 			result.Request.Body = reqBody
 		}
@@ -162,6 +281,7 @@ func Result(baseurl, fullURL string, resp *http.Response) (*Response, error) {
 
 	result.Json = Json
 	result.Length = len(body)
+	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
 	return &result, nil
 }
 
@@ -172,22 +292,14 @@ func HEAD(baseurl string, arg ...GetRequest) (*Response, error) {
 		args = arg[0]
 	}
 	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
-	req, err := http.NewRequest(http.MethodHead, fullURL, nil)
-	if err != nil {
-		return &Response{}, err
-	}
-	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	timer := time.Now().UnixMicro()
-	resp, err := client.Do(req)
+	res, err := SetGetRequest("head", client, fullURL, baseurl, reqArg, args)
 	if err != nil {
 		return nil, err
 	}
-	timer = time.Now().UnixMicro() - timer
-	result, err := Result(baseurl, fullURL, resp)
+	result, err := Result(baseurl, fullURL, res.resp, res.timer)
 	if err != nil {
 		return nil, err
 	}
-	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
 	return result, nil
 }
 
@@ -198,22 +310,14 @@ func OPTIONS(baseurl string, arg ...GetRequest) (*Response, error) {
 		args = arg[0]
 	}
 	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
-	req, err := http.NewRequest(http.MethodHead, fullURL, nil)
-	if err != nil {
-		return &Response{}, err
-	}
-	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	timer := time.Now().UnixMicro()
-	resp, err := client.Do(req)
+	res, err := SetGetRequest("options", client, fullURL, baseurl, reqArg, args)
 	if err != nil {
 		return nil, err
 	}
-	timer = time.Now().UnixMicro() - timer
-	result, err := Result(baseurl, fullURL, resp)
+	result, err := Result(baseurl, fullURL, res.resp, res.timer)
 	if err != nil {
 		return nil, err
 	}
-	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
 	return result, nil
 }
 
@@ -229,6 +333,9 @@ func GET(baseurl string, arg ...GetRequest) (*Response, error) {
 		return &Response{}, err
 	}
 	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
+	if host := req.Header.Get("Host"); host != "" {
+		req.Host = host
+	}
 	if args.Cms {
 		req.AddCookie(&http.Cookie{Name: "rememberMe", Value: "me"})
 	}
@@ -242,11 +349,10 @@ func GET(baseurl string, arg ...GetRequest) (*Response, error) {
 			return nil, err
 		}
 	}
-	result, err := Result(baseurl, fullURL, resp)
+	result, err := Result(baseurl, fullURL, resp, timer)
 	if err != nil {
 		return nil, err
 	}
-	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
 	return result, nil
 }
 
@@ -257,98 +363,15 @@ func POST(baseurl string, arg ...GetRequest) (*Response, error) {
 		args = arg[0]
 	}
 	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
-	var body io.Reader
-	var buf bytes.Buffer
-	var bodyByte = make([]byte, 0)
-	if args.File != nil {
-		w := NewWriter(&buf)
-		reqArg.Headers["Content-Type"] = w.FormDataContentType()
-		if args.DataJson != nil {
-			for k, v := range args.DataJson {
-				fileWrite, err := w.CreateFormField(k)
-				if err != nil {
-					return nil, err
-				}
-				_, err = fileWrite.Write([]byte(v))
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-		for Field, file := range args.File {
-			if len(file) < 0 {
-				return nil, errors.New("")
-			}
-			var err error
-			var fileWrite io.Writer
-			if len(file) > 2 {
-				fileWrite, err = w.CreateFormFile(Field, file[0], file[2])
-			} else {
-				fileWrite, err = w.CreateFormFile(Field, file[0])
-			}
-			if err != nil {
-				return nil, err
-			}
-			if len(file) > 1 {
-				_, err = fileWrite.Write([]byte(file[1]))
-			} else {
-				_, err = fileWrite.Write([]byte(""))
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
-		err := w.Close()
-		if err != nil {
-			return nil, err
-		}
-		body = &buf
-		bodyByte = buf.Bytes()
-	} else if args.Data != "" {
-		body = strings.NewReader(args.Data)
-		if d, e := io.ReadAll(strings.NewReader(args.Data)); e == nil {
-			bodyByte = d
-		}
-		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
-	} else if args.DataJson != nil {
-		isFirst := true
-		for key, value := range args.DataJson {
-			if !isFirst {
-				buf.WriteString("&")
-			}
-			isFirst = false
-			buf.WriteString(url.QueryEscape(key))
-			buf.WriteString("=")
-			buf.WriteString(url.QueryEscape(value))
-		}
-		body = &buf
-		bodyByte = buf.Bytes()
-		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
-	} else if args.Json != nil {
-		jsonData, err := json.Marshal(args.Json)
-		if err != nil {
-			return nil, err
-		}
-		body = strings.NewReader(string(jsonData))
-		bodyByte = jsonData
-		reqArg.Headers["Content-Type"] = "application/json"
-	}
-	req, err := http.NewRequest(http.MethodPost, fullURL, body)
-	if err != nil {
-		return &Response{}, err
-	}
-	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	timer := time.Now().UnixMicro()
-	resp, err := client.Do(req)
+	res, err := SetGetRequest("post", client, fullURL, baseurl, reqArg, args)
 	if err != nil {
 		return nil, err
 	}
-	result, err := Result(baseurl, fullURL, resp)
+	result, err := Result(baseurl, fullURL, res.resp, res.timer)
 	if err != nil {
 		return nil, err
 	}
-	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
-	result.Request.Body = bodyByte
+	result.Request.Body = res.body
 	return result, nil
 }
 
@@ -359,97 +382,14 @@ func PUT(baseurl string, arg ...GetRequest) (*Response, error) {
 		args = arg[0]
 	}
 	reqArg, client, fullURL := GetRequestGetArg(baseurl, args)
-	var body io.Reader
-	var buf bytes.Buffer
-	var bodyByte = make([]byte, 0)
-	if args.File != nil {
-		w := NewWriter(&buf)
-		reqArg.Headers["Content-Type"] = w.FormDataContentType()
-		if args.DataJson != nil {
-			for k, v := range args.DataJson {
-				fileWrite, err := w.CreateFormField(k)
-				if err != nil {
-					return nil, err
-				}
-				_, err = fileWrite.Write([]byte(v))
-				if err != nil {
-					return nil, err
-				}
-			}
-		}
-		for Field, file := range args.File {
-			if len(file) < 0 {
-				return nil, errors.New("")
-			}
-			var err error
-			var fileWrite io.Writer
-			if len(file) > 2 {
-				fileWrite, err = w.CreateFormFile(Field, file[0], file[2])
-			} else {
-				fileWrite, err = w.CreateFormFile(Field, file[0])
-			}
-			if err != nil {
-				return nil, err
-			}
-			if len(file) > 1 {
-				_, err = fileWrite.Write([]byte(file[1]))
-			} else {
-				_, err = fileWrite.Write([]byte(""))
-			}
-			if err != nil {
-				return nil, err
-			}
-		}
-		err := w.Close()
-		if err != nil {
-			return nil, err
-		}
-		body = &buf
-		bodyByte = buf.Bytes()
-	} else if args.Data != "" {
-		body = strings.NewReader(args.Data)
-		if d, e := io.ReadAll(strings.NewReader(args.Data)); e == nil {
-			bodyByte = d
-		}
-		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
-	} else if args.DataJson != nil {
-		isFirst := true
-		for key, value := range args.DataJson {
-			if !isFirst {
-				buf.WriteString("&")
-			}
-			isFirst = false
-			buf.WriteString(url.QueryEscape(key))
-			buf.WriteString("=")
-			buf.WriteString(url.QueryEscape(value))
-		}
-		body = &buf
-		bodyByte = buf.Bytes()
-		reqArg.Headers["Content-Type"] = "application/x-www-form-urlencoded"
-	} else if args.Json != nil {
-		jsonData, err := json.Marshal(args.Json)
-		if err != nil {
-			return nil, err
-		}
-		body = strings.NewReader(string(jsonData))
-		bodyByte = jsonData
-		reqArg.Headers["Content-Type"] = "application/json"
-	}
-	req, err := http.NewRequest(http.MethodPut, fullURL, body)
-	if err != nil {
-		return &Response{}, err
-	}
-	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	timer := time.Now().UnixMicro()
-	resp, err := client.Do(req)
+	res, err := SetGetRequest("put", client, fullURL, baseurl, reqArg, args)
 	if err != nil {
 		return nil, err
 	}
-	result, err := Result(baseurl, fullURL, resp)
+	result, err := Result(baseurl, fullURL, res.resp, res.timer)
 	if err != nil {
 		return nil, err
 	}
-	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
-	result.Request.Body = bodyByte
+	result.Request.Body = res.body
 	return result, nil
 }
