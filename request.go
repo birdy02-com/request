@@ -63,7 +63,7 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	// 请求参数设置
 	// 创建一个自定义的Transport，并禁用证书验证
 	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	if args.Proxy != "" && strings.HasPrefix(args.Proxy, "http") {
+	if args.Proxy != "" && IsLink(args.Proxy) {
 		if proxyURL, err := url.Parse(args.Proxy); err == nil {
 			transport.Proxy = http.ProxyURL(proxyURL)
 		}
@@ -84,7 +84,7 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 		} else if tmpParams != "" {
 			Params = tmpParams
 		}
-		fullURL = fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Host, uParse.Path, Params)
+		fullURL = fmt.Sprintf("%s://%s:%s%s?%s", uParse.Scheme, uParse.Hostname(), uParse.Port(), uParse.Path, Params)
 		fullURL = strings.ReplaceAll(fullURL, " ", "%20")
 		suffixToRemove := "?"
 		if strings.HasSuffix(fullURL, suffixToRemove) {
@@ -243,6 +243,31 @@ func Result(baseurl, fullURL string, resp *http.Response, timer int64) (*Respons
 	if resp == nil {
 		return &result, nil
 	}
+	//Header
+	result.Request.URL = fullURL
+	if par, err := ParseUrl(fullURL); err == nil {
+		if host := resp.Request.Header.Get("Host"); host != "" {
+			result.Request.URL = strings.Replace(fullURL, fmt.Sprintf("%s:%s", par.Hostname, par.Port), host, -1)
+		}
+	}
+	result.Request.Method = resp.Request.Method
+	result.Request.Headers = resp.Request.Header
+	result.Headers = resp.Header
+	result.Url = resp.Request.URL.String()
+	result.Proto = resp.Proto
+	result.ProtoMajor = resp.ProtoMajor
+	result.ProtoMinor = resp.ProtoMinor
+	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
+	result.Status = resp.Status
+	result.StatusCode = resp.StatusCode
+	if resp.StatusCode > 300 && resp.StatusCode < 400 {
+		result.Redirect = resp.Header.Get("Location")
+	}
+	if resp.Request.Method == http.MethodHead {
+		return &result, nil
+	}
+
+	//Body
 	defer func(Body io.ReadCloser) { _ = Body.Close() }(resp.Body)
 	// 获取原始(字节)响应体
 	content, _ := io.ReadAll(resp.Body)
@@ -262,18 +287,7 @@ func Result(baseurl, fullURL string, resp *http.Response, timer int64) (*Respons
 	// 解析JSON响应到结构体
 	var Json = ResponseJson{}
 	_ = json.Unmarshal(content, &Json)
-	// Request 参数
-	result.Request.URL = fullURL
-
-	if par, err := ParseUrl(fullURL); err == nil {
-		if host := resp.Request.Header.Get("Host"); host != "" {
-			result.Request.URL = strings.Replace(fullURL, par.Hostname, host, -1)
-		}
-	}
-
-	result.Request.Method = resp.Request.Method
-	result.Request.Headers = resp.Request.Header
-	if resp.Request.Method == "POST" && resp.Request.Body != nil {
+	if resp.Request.Body != nil {
 		defer func(Body io.ReadCloser) { _ = Body.Close() }(resp.Request.Body)
 		if reqBody, err := io.ReadAll(resp.Request.Body); err == nil {
 			result.Request.Body = reqBody
@@ -281,20 +295,8 @@ func Result(baseurl, fullURL string, resp *http.Response, timer int64) (*Respons
 	}
 
 	// Response
-	result.Status = resp.Status
-	result.StatusCode = resp.StatusCode
-	if resp.StatusCode > 300 && resp.StatusCode < 400 {
-		result.Redirect = resp.Header.Get("Location")
-	}
-	result.Headers = resp.Header
-	result.Url = resp.Request.URL.String()
-	result.Proto = resp.Proto
-	result.ProtoMajor = resp.ProtoMajor
-	result.ProtoMinor = resp.ProtoMinor
-
 	result.Json = Json
 	result.Length = len(body)
-	result.Timer = float64(time.Now().UnixMicro()-timer) / 1e6
 	return &result, nil
 }
 
