@@ -1,6 +1,7 @@
 package request
 
 import (
+	"crypto/tls"
 	"net/http"
 )
 
@@ -26,6 +27,8 @@ type GetRequest struct {
 	DataJson       map[string]string
 	Json           map[string]any
 	File           map[string][]string
+	Proxy          string
+	Cms            bool
 }
 
 // UrlParse URL格式化后格式
@@ -68,6 +71,8 @@ type Response struct {
 		Headers http.Header //请求头
 		Body    []byte      // 请求体
 	}
+
+	TLS *tls.ConnectionState
 }
 
 // UrlParser URL格式化结构
@@ -85,12 +90,4 @@ type SiteBasic struct {
 	Description string `json:"description"`
 	Keywords    string `json:"keywords"`
 	Favicon     string `json:"favicon"`
-}
-
-// Fingerprint cms文件结构
-type Fingerprint struct {
-	Cms      string
-	Method   string
-	Location string
-	Keyword  []string
 }

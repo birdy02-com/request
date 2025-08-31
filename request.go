@@ -2,10 +2,12 @@ package request
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/yosssi/gohtml"
 	"html"
 	"io"
 	"net/http"
@@ -20,7 +22,7 @@ var _ = os.Setenv("GODEBUG", "tlsrsakex=1")
 // GetRequestInit 默认请求的参数值
 func GetRequestInit() *GetRequest {
 	var res GetRequest
-	res.Timeout = 10
+	res.Timeout = 60
 	res.AllowRedirects = false
 	res.Verify = false
 	res.Headers = make(map[string]string)
@@ -35,7 +37,9 @@ func GetRequestInit() *GetRequest {
 func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client, string) {
 	baseurl = strings.TrimSpace(baseurl)
 	reqArg := GetRequestInit() // 获取请求配置
+
 	// 处理传入参数
+
 	// 超时时长
 	if args.Timeout != 0 && args.Timeout != reqArg.Timeout {
 		reqArg.Timeout = args.Timeout
@@ -50,7 +54,9 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	}
 	// 是否添加Headers
 	if args.Headers != nil {
-		reqArg.Headers = args.Headers
+		for k, v := range args.Headers {
+			reqArg.Headers[k] = v
+		}
 	}
 	// 是否有Params参数
 	if args.Params != nil {
@@ -62,29 +68,34 @@ func GetRequestGetArg(baseurl string, args GetRequest) (*GetRequest, http.Client
 	}
 	// 请求参数设置
 	// 创建一个自定义的Transport，并禁用证书验证
-	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	transport := &http.Transport{
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		MaxIdleConns:        100,
+		MaxIdleConnsPerHost: 100,
+		IdleConnTimeout:     90 * time.Second,
+	}
+
 	if args.Proxy != "" && IsLink(args.Proxy) {
 		if proxyURL, err := url.Parse(args.Proxy); err == nil {
 			transport.Proxy = http.ProxyURL(proxyURL)
 		}
 	}
 
-	// 设置Params
-	params := url.Values{}
-	for k, v := range reqArg.Params {
-		params.Set(k, v)
-	}
-	Params := params.Encode()
-	uParse, err := url.Parse(baseurl)
 	var fullURL string
+	uParse, err := url.Parse(baseurl)
 	if err == nil {
-		tmpParams := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(uParse.RequestURI(), uParse.Path), "?"), "/")
-		if tmpParams != "" && Params != "" {
-			Params = fmt.Sprintf("%s&%s", Params, tmpParams)
-		} else if tmpParams != "" {
-			Params = tmpParams
+		// 设置Params
+		params := uParse.Query()
+		for k, v := range reqArg.Params {
+			params.Set(k, v)
 		}
-		fullURL = fmt.Sprintf("%s://%s:%s%s?%s", uParse.Scheme, uParse.Hostname(), uParse.Port(), uParse.Path, Params)
+		Params := params.Encode()
+
+		if uParse.Port() != "" {
+			fullURL = fmt.Sprintf("%s://%s:%s%s?%s", uParse.Scheme, uParse.Hostname(), uParse.Port(), uParse.Path, Params)
+		} else {
+			fullURL = fmt.Sprintf("%s://%s%s?%s", uParse.Scheme, uParse.Hostname(), uParse.Path, Params)
+		}
 		fullURL = strings.ReplaceAll(fullURL, " ", "%20")
 		suffixToRemove := "?"
 		if strings.HasSuffix(fullURL, suffixToRemove) {
@@ -207,19 +218,17 @@ func SetGetRequest(method string, client http.Client, fullURL, baseurl string, r
 	case "put":
 		reqMethod = http.MethodPut
 	}
-
 	req, err := http.NewRequest(reqMethod, fullURL, body)
 	if err != nil {
 		return &res, err
 	}
+
 	req.Header = GetHeader(&GetHeaderArgs{header: reqArg.Headers, Engine: args.Engine, api: baseurl})
-	if host := req.Header.Get("Host"); host != "" {
-		req.Host = host
-	}
 	if args.Cms {
 		req.AddCookie(&http.Cookie{Name: "rememberMe", Value: "me"})
 	}
 	timer := time.Now().UnixMicro()
+	req.Host = req.Header.Get("Host")
 	res.resp, err = client.Do(req)
 
 	if args.Cms && (err != nil || res.resp == nil || res.resp.StatusCode != 200) {
@@ -245,11 +254,10 @@ func Result(baseurl, fullURL string, resp *http.Response, timer int64) (*Respons
 	}
 	//Header
 	result.Request.URL = fullURL
-	if par, err := ParseUrl(fullURL); err == nil {
-		if host := resp.Request.Header.Get("Host"); host != "" {
-			result.Request.URL = strings.Replace(fullURL, fmt.Sprintf("%s:%s", par.Hostname, par.Port), host, -1)
-		}
+	if host := resp.Request.Header.Get("Host"); host != "" {
+		result.Request.URL = strings.Replace(fullURL, GetHostName(fullURL), host, -1)
 	}
+	result.TLS = resp.TLS
 	result.Request.Method = resp.Request.Method
 	result.Request.Headers = resp.Request.Header
 	result.Headers = resp.Header
@@ -269,21 +277,36 @@ func Result(baseurl, fullURL string, resp *http.Response, timer int64) (*Respons
 
 	//Body
 	defer func(Body io.ReadCloser) { _ = Body.Close() }(resp.Body)
+	var content []byte
+
+	switch resp.Header.Get("Content-Encoding") {
+	case "gzip":
+		// 解压 gzip
+		if reader, err := gzip.NewReader(resp.Body); err == nil {
+			defer func(reader *gzip.Reader) { _ = reader.Close() }(reader)
+			content, _ = io.ReadAll(reader)
+		}
+	default:
+		content, _ = io.ReadAll(resp.Body)
+	}
+
 	// 获取原始(字节)响应体
-	content, _ := io.ReadAll(resp.Body)
+
 	result.Content = content
 	// 获取str格式body
 	body := string(content)
+	body = strings.ReplaceAll(body, " ", "")
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	charsetContent, charSet := CharSetContent(content, body, contentType)
-	body = html.UnescapeString(charsetContent)
-	result.Body = body
+	body = html.UnescapeString(FilterString(charsetContent))
+	result.Body = gohtml.Format(body)
 	result.Charset = charSet
 	basic := GetSiteBasic(baseurl, body)
 	result.Basic.Title = basic.Title
 	result.Basic.Description = basic.Description
 	result.Basic.Keywords = basic.Keywords
 	result.Basic.Favicon = basic.Favicon
+
 	// 解析JSON响应到结构体
 	var Json = ResponseJson{}
 	_ = json.Unmarshal(content, &Json)
@@ -347,6 +370,7 @@ func GET(baseurl string, arg ...GetRequest) (*Response, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	result, err := Result(baseurl, fullURL, res.resp, res.timer)
 	if err != nil {
 		return nil, err
