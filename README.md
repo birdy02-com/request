@@ -40,17 +40,44 @@ go get github.com/birdy02-com/request
 通过 `request`，开发者可以专注于业务逻辑的实现，而无需过多关注底层请求细节，为开发工作带来极大的便利与提升。
 
 # 主要功能
-1. HEAD 请求方法
-2. GET 请求方法
-3. POST 请求方法
-4. Result 格式化响应内容
-5. IsIpv4 检查一个IP字符串是否为IPv4地址
-6. GetRandomIP 生成一个随机的IP地址
-7. IsPrivateIP 判断IP是否为私有地址
-8. ParseUrl 格式化URL
-9. GetHeader 获取默认请求头
-10. GetSiteBasic 提取网站的基本信息
-11. GetFaviconPath 获取favicon.ico的路径
+## 请求方法
+1. HEAD()
+2. OPTIONS()
+3. GET()
+4. POST()
+5. PUT()
+
+## 请求需要方法
+1. GetHeader() 获取格式化请求头
+2. GetPhoneHeader() 获取格式化请求头(手机)
+
+ ## IP相关
+- IsIpv4() 检查一个IP字符串是否为IPv4地址
+- GetRandomIP() 生成一个随机的IP地址
+
+## 域名方法
+- RootDomain() 检查一个字符串是否为域名并获取根域名
+- GetDomain() URL获取域名
+- GetHostName() URL获取hostname
+
+## URL相关  
+- IsLink() 判断是否为URL
+- GetUrlIpv4() 获取Url的IPv4地址
+- ParseUrl() 格式化URL
+- GetRootLink() 获取不带路径参数的URL
+- FormatUrl() 格式化URL
+- CheckCDN() 检测是否为CDN
+
+## 其他方法
+- GetAllTagA() 获取所有A标签的href值列表
+- GetAllJs() 获取所有Js列表
+- HttpHeaderToString() http.header 转换成 String
+- HttpHeaderToMap() http.header 转换成 map
+
+## 文件相关
+- IsJsFile() 是否为Js文件
+- IsCssFile() 是否为Css文件
+- IsMediaFile() 是否为媒体文件
 
 # 响应返回格式
 
@@ -79,10 +106,11 @@ type Response struct {
 	ProtoMinor int                    // 响应版本号-子
 	Request    struct {
 		URL     string      // 请求url
-		Method  string      //请求方法
-		Headers http.Header //请求头
+		Method  string      // 请求方法
+		Headers http.Header // 请求头
 		Body    []byte      // 请求体
 	}
+	TLS *tls.ConnectionState // https请求TLS信息
 }
 ```
 
