@@ -19,6 +19,8 @@ import (
 
 var _ = os.Setenv("GODEBUG", "tlsrsakex=1")
 
+var VERSION = "v1.1"
+
 // GetRequestInit 默认请求的参数值
 func GetRequestInit() *GetRequest {
 	var res GetRequest
